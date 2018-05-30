@@ -5,9 +5,7 @@
 #include <list>
 #include <cstring>
 #include <random>
-
-static std::random_device rd;
-static std::mt19937 gen(rd());
+#include <algorithm>
 
 template <typename T, unsigned max_level>
 struct skiplist_node {
@@ -24,7 +22,6 @@ struct skiplist_node {
         memcpy(_fp, other._fp, max_level);
     }
 
-
 };
 
 template <
@@ -37,13 +34,13 @@ class base_skiplist : private Alloc {
 public:
     using node_type = Node<T, max_level>;
 
-    template <typename U>
+    template <typename NodeType, typename U>
     struct base_iterator: public std::iterator<std::input_iterator_tag, U>  {
-        using node_type = Node<U, max_level>;
+        using node_type = NodeType;
         node_type *_iter = nullptr;
     public:
         base_iterator() = default;
-        base_iterator(node_type *iter) : _iter(iter) {}
+        explicit base_iterator(node_type *iter) : _iter(iter) {}
         base_iterator(const base_iterator &) = default;
 
         U &operator*() {
@@ -51,13 +48,17 @@ public:
         }
 
         inline base_iterator operator++() {
-            _iter = _iter->_fp[0];
+            if (_iter){
+                _iter = _iter->_fp[0];
+            }
             return *this;
         }
 
         inline base_iterator operator++(int) {
             base_iterator cur(*this);
-            _iter = _iter->_fp[0];
+            if (_iter) {
+                _iter = _iter->_fp[0];
+            }
             return cur;
         }
 
@@ -75,37 +76,52 @@ public:
 
     };
 
-    using iterator = base_iterator<T>;
-    using const_iterator = base_iterator<const T>;
+    using iterator = base_iterator<Node<T, max_level>, T>;
+    using const_iterator = base_iterator<const Node<T, max_level>, const T>;
 
 private:
     node_type *_roots[max_level] = { nullptr };
+    size_t _size = 0;
 
-    node_type *precedents(const T &target, node_type **precedents[]) {
+    node_type *predecessors(const T &target, node_type **predecessors[]) {
         unsigned level = max_level - 1;
         node_type *ret = nullptr;
         for (int i = 0; i < max_level; i++) {
-            precedents[i] = &_roots[i];
+            predecessors[i] = &_roots[i];
         }
         for (;;) {
-            if (!level && *precedents[0] && target == (*precedents[0])->_t) {
-                if (!ret) ret = *precedents[0];
+            if (!level && *predecessors[0] && target == (*predecessors[0])->_t) {
+                if (!ret) ret = *predecessors[0];
             }
 
-            if (!*precedents[level] || target < (*precedents[level])->_t) {
+            if (!*predecessors[level] || target <= (*predecessors[level])->_t) {
                 if (level) {
                     --level;
                 } else {
                     break;
                 }
             } else {
-                precedents[level] = &((*precedents[level])->_fp[level]);
+                predecessors[level] = &((*predecessors[level])->_fp[level]);
             }
         }
         return ret;
     }
 
+    void insert_node(node_type *node) {
+        ++_size;
+        node_type **precs[max_level];
+        predecessors(node->_t, precs);
+        unsigned level = random_level();
+        for (auto l = 0; l <= level; l++) {
+            node_type *next = *precs[l];
+            node->_fp[l] = next;
+            *precs[l] = node;
+        }
+    }
+
     unsigned random_level() {
+        static std::random_device rd;
+        static std::mt19937 gen(rd());
         std::geometric_distribution<> d;
         do {
             auto ret = d(gen);
@@ -116,67 +132,97 @@ private:
     }
 
 public:
-
     base_skiplist() = default;
 
-    base_skiplist(const base_skiplist &) {
-
+    base_skiplist(const base_skiplist &other) {
+        for (auto  &&e : other) {
+            insert(e);
+        }
     }
 
-    base_skiplist(base_skiplist &&other) {
+    base_skiplist(base_skiplist &&other) noexcept : _size(other._size) {
         memcpy(_roots, other._roots, sizeof(_roots));
+        other._size = 0;
+        std::fill(other._roots, other._roots + max_level, nullptr);
     }
+
+    base_skiplist (std::initializer_list<T> ilist) {
+        for (auto const &elem : ilist) {
+            insert(elem);
+        }
+    }
+
+    base_skiplist &operator=(const base_skiplist &rhs) {
+        base_skiplist clone(rhs);
+        this->~base_skiplist();
+        new(this) base_skiplist(std::move(clone));
+        return *this;
+    }
+
+    base_skiplist &operator=(base_skiplist &&rhs) {
+        this->~base_skiplist();
+        new(this) base_skiplist(std::move(clone));
+        return *this;
+    }
+
 
     iterator find(const T &elem) {
         node_type **ignore[max_level];
-        return {precedents(elem, ignore)};
+        return iterator{ predecessors(elem, ignore) };
     }
 
     iterator insert(const T &elem) {
-        node_type **precs[max_level];
-        precedents(elem, precs);
         node_type *curr = this->allocate(1);
         this->construct(curr);
         new(&curr->_t) T(elem);
-        unsigned level = random_level();
-        for (auto l = 0; l <= level; l++) {
-            node_type *next = *precs[l];
-            curr->_fp[l] = next;
-            *precs[l] = curr;
-        }
+        insert_node(curr);
         return iterator(curr);
     }
 
     template <typename ...Args>
-    iterator emplace(Args ...args) {
+    iterator emplace(Args &&...args) {
         node_type *curr = this->allocate(1);
         this->construct(curr);
-        new(&curr->_t) T(std::forward<Args...>(std::move(args)...));
-        node_type **precs[max_level];
-        precedents(curr->_t, precs);
-        unsigned level = random_level();
-        for (auto l = 0; l <= level; l++) {
-            node_type *next = *precs[l];
-            curr->next[l] = next;
-            *precs[l] = curr;
-        }
+        new(&curr->_t) T(std::forward<Args>(args)...);
+        insert_node(curr);
         return iterator(curr);
     }
 
+    size_t erase(const T &elem) {
+        node_type **precs[max_level];
+        size_t removed = 0;
+        for (;;) {
+            node_type *self = predecessors(elem, precs);
+            if (!self) return removed;
+            for (int l = 0; l < max_level; l++) {
+                if (*precs[l] == self) {
+                    *precs[l] = self->_fp[l];
+                }
+            }
+            this->destroy(self);
+            this->deallocate(self, 1);
+            ++removed;
+        }
+    }
+
     iterator begin() {
-        return { _roots[0] };
+        return iterator{ _roots[0] };
     }
 
     iterator end() {
         return {};
     }
 
-    const_iterator cbegin() {
-        return { _roots[0] };
+    const_iterator begin() const {
+        return const_iterator{ _roots[0] };
     }
 
-    const_iterator cend() {
+    const_iterator end() const {
         return {};
+    }
+
+    size_t size() {
+        return _size;
     }
 
 
