@@ -1,21 +1,17 @@
 #include <iostream>
+#include <random>
+#include <set>
 #include "skiplist.h"
 
-int main() {
-    skiplist<int, 4> sklist;
-    for (int i = 0; i < 100; i++) {
-        sklist.insert(i);
-        sklist.insert(i);
-    }
-    for (auto elem : sklist) {
-        std::cout << elem << std::endl;
-    }
+std::random_device rd;
+std::mt19937 gen(rd());
 
-    auto it = sklist.find(50);
-    while (it != sklist.end()) {
-        std::cout << *it << std::endl;
-        ++it;
+int main() {
+    std::uniform_int_distribution<> d;
+    skiplist<int, 16> s;
+//    std::set<int> s;
+    for (int i = 0; i < 1 << 16; i++) {
+        s.insert(d(gen));
     }
-    std::cout << "Hello, World!" << std::endl;
     return 0;
 }

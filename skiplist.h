@@ -85,18 +85,14 @@ private:
 
     node_type *predecessors(const T &target, node_type **predecessors[]) {
         unsigned level = max_level - 1;
-        node_type *ret = nullptr;
         for (int i = 0; i < max_level; i++) {
             predecessors[i] = &_roots[i];
         }
         for (;;) {
-            if (!level && *predecessors[0] && target == (*predecessors[0])->_t) {
-                if (!ret) ret = *predecessors[0];
-            }
-
             if (!*predecessors[level] || target <= (*predecessors[level])->_t) {
                 if (level) {
                     --level;
+                    predecessors[level] = predecessors[level + 1] - 1;
                 } else {
                     break;
                 }
@@ -104,7 +100,7 @@ private:
                 predecessors[level] = &((*predecessors[level])->_fp[level]);
             }
         }
-        return ret;
+        return (*predecessors[0] && (*predecessors[0])->_t == target) ? *(predecessors[0]) : nullptr;
     }
 
     void insert_node(node_type *node) {
@@ -193,7 +189,11 @@ public:
         size_t removed = 0;
         for (;;) {
             node_type *self = predecessors(elem, precs);
-            if (!self) return removed;
+            if (!self) {
+                assert(_size >= removed);
+                _size -= removed;
+                return removed;
+            }
             for (int l = 0; l < max_level; l++) {
                 if (*precs[l] == self) {
                     *precs[l] = self->_fp[l];

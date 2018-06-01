@@ -32,3 +32,6 @@ set(SOURCE_FILES test.cc skiplist.h)
 add_executable(test-bst ${SOURCE_FILES})
 target_include_directories(test-bst PUBLIC ${CATCH_INCLUDE_DIR})
 enable_testing(true)  # Enables unit-testing.
+
+set(F main.cpp skiplist.h)
+add_executable(main ${F})

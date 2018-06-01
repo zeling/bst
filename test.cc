@@ -8,7 +8,7 @@ TEST_CASE("skiplist") {
     SECTION("should init") {
         REQUIRE_NOTHROW([&]{
             skiplist<int, 8> sklist;
-        });
+        }());
     }
 
     SECTION("move constructor should not throw") {
