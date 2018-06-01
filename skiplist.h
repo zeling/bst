@@ -82,32 +82,30 @@ public:
 private:
     node_type *_roots[max_level] = { nullptr };
     size_t _size = 0;
+    unsigned _level = 0;
 
-    node_type *predecessors(const T &target, node_type **predecessors[]) {
-        unsigned level = max_level - 1;
-        for (int i = 0; i < max_level; i++) {
+    void predecessors(const T &target, node_type **predecessors[], unsigned level) {
+        for (int i = level; i < max_level; ++i) {
             predecessors[i] = &_roots[i];
         }
-        for (;;) {
-            if (!*predecessors[level] || target <= (*predecessors[level])->_t) {
-                if (level) {
-                    --level;
-                    predecessors[level] = predecessors[level + 1] - 1;
-                } else {
-                    break;
-                }
-            } else {
+        while (level) {
+            while (*predecessors[level] && (*predecessors[level])->_t < target) {
                 predecessors[level] = &((*predecessors[level])->_fp[level]);
             }
+            --level;
+            predecessors[level] = predecessors[level + 1] - 1;
         }
-        return (*predecessors[0] && (*predecessors[0])->_t == target) ? *(predecessors[0]) : nullptr;
+        while (*predecessors[0] && (*predecessors[0])->_t < target) {
+            predecessors[0] = &((*predecessors[0])->_fp[0]);
+        }
     }
 
     void insert_node(node_type *node) {
         ++_size;
         node_type **precs[max_level];
-        predecessors(node->_t, precs);
         unsigned level = random_level();
+        _level = std::max(_level, level);
+        predecessors(node->_t, precs, _level);
         for (auto l = 0; l <= level; l++) {
             node_type *next = *precs[l];
             node->_fp[l] = next;
@@ -125,6 +123,11 @@ private:
                 return ret;
             }
         } while (true);
+    }
+
+    node_type *found(const T &elem, node_type **precs[]) {
+        node_type *cand = *precs[0];
+        return cand && cand->_t == elem ? cand : nullptr;
     }
 
 public:
@@ -163,8 +166,9 @@ public:
 
 
     iterator find(const T &elem) {
-        node_type **ignore[max_level];
-        return iterator{ predecessors(elem, ignore) };
+        node_type **precs[max_level];
+        predecessors(elem, precs, _level);
+        return iterator{ found(elem, precs) };;
     }
 
     iterator insert(const T &elem) {
@@ -188,7 +192,8 @@ public:
         node_type **precs[max_level];
         size_t removed = 0;
         for (;;) {
-            node_type *self = predecessors(elem, precs);
+            predecessors(elem, precs, _level);
+            node_type *self = found(elem, precs);
             if (!self) {
                 assert(_size >= removed);
                 _size -= removed;
@@ -227,14 +232,12 @@ public:
 
 
     ~base_skiplist() {
-        if (_roots[0]) {
-            node_type *node = _roots[0];
-            while (node) {
-                node_type *next = node->_fp[0];
-                this->destroy(node);
-                this->deallocate(node, 1);
-                node = next;
-            }
+        node_type *node = _roots[0];
+        while (node) {
+            node_type *next = node->_fp[0];
+            this->destroy(node);
+            this->deallocate(node, 1);
+            node = next;
         }
     }
 
